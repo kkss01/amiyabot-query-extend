@@ -4,10 +4,10 @@ import asyncio
 from typing import Dict, List, Any
 
 from core import log
-from core.util import any_match, find_most_similar, remove_punctuation
+from core.util import any_match, all_match, find_most_similar, remove_punctuation
 from core.customPluginInstance import AmiyaBotPluginInstance
 from core.resource.arknightsGameData import ArknightsGameData
-from amiyabot import Message, Chain
+from amiyabot import Message, Chain, event_bus
 from amiyabot.log import LoggerManager
 
 from .operatorData import OperatorData, OperatorSearchInfo
@@ -19,6 +19,7 @@ STR_DICT_LIST = Dict[str, List[str]]
 
 log = LoggerManager(' \b\b查询扩展')
 
+
 class QueryExtendInstance(AmiyaBotPluginInstance):
     def install(self):
         asyncio.create_task(ExtendInfo.init_extend_info())
@@ -26,7 +27,7 @@ class QueryExtendInstance(AmiyaBotPluginInstance):
 
 bot = QueryExtendInstance(
     name='干员查询扩展',
-    version='2.5.2',
+    version='2.5.7',
     plugin_id='kkss-query-extend',
     plugin_type='',
     description='查询某个类别的所属干员',
@@ -35,13 +36,23 @@ bot = QueryExtendInstance(
     global_config_schema=f'{curr_dir}/schema.json',
 )
 
+@event_bus.subscribe('gameDataInitialized')
+def update(_):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        bot.install()
+
+
 def remove_prefix(text:str):
     for item in bot.prefix_keywords:
         if text.startswith(item):
             text = text.replace(item, '', 1)
             return text
-    
     return text
+
 
 class ExtendInfo:
     operators_name: List[str] = []
@@ -57,8 +68,17 @@ class ExtendInfo:
     @classmethod
     async def init_extend_info(cls):
 
+        ExtendInfo.operators_name = []
+        ExtendInfo.classes_sub.clear()
+        ExtendInfo.classes.clear()
+        ExtendInfo.drawer.clear()
+        ExtendInfo.race.clear()
+        ExtendInfo.nation.clear()
+        ExtendInfo.group.clear()
+        ExtendInfo.team.clear()
+        
         operators = sorted(ArknightsGameData.operators.values(), key=lambda x:x.rarity, reverse=True)
-
+        
         for item in operators:
             ExtendInfo.operators_name.append(item.name)
             ExtendInfo.append(ExtendInfo.classes_sub, item.classes_sub, item.name)
@@ -73,7 +93,10 @@ class ExtendInfo:
         for dict in ExtendInfo.index:
             l += len(dict)
             
-        log.info(f'已注册 {l} 个对象')
+        if l > 0:
+            log.info(f'已注册 {l} 个对象')
+        else:
+            log.error(f'错误: 没有任何对象被注册, 请检查资源是否正常解析')
             
 
     @staticmethod
@@ -84,6 +107,7 @@ class ExtendInfo:
             if no_repeat and value in target_dict[key]:
                 return
             target_dict[key].append(value)
+
 
 async def search_char_by_text(text: str) :
     source = ExtendInfo.operators_name
@@ -96,7 +120,10 @@ async def search_char_by_text(text: str) :
 async def extend_verify(data: Message):
     level = bot.get_config('defaultLevel')
     
-    if attr := any_match(data.text, ['分支','种族','势力','阵营','队伍','画师']):
+    if all_match(data.text, ['阿米娅','近卫']):
+        level -= 3
+    
+    if attr := any_match(data.text, ['分支','职业','种族','势力','阵营','队伍','画师']):
         level += 3
         
     candidate = [0,'']
@@ -147,6 +174,7 @@ async def reverse_verify(data: Message):
 
     level += bot.get_config('defaultLevel')
     return True, level, [r.group(1),r.group(2)]
+    
     
 @bot.on_message(verify=reverse_verify, check_prefix=True)
 async def _(data: Message):
